@@ -178,7 +178,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-weight:
   .sidebar{display:none}
   .content{padding:1rem 0.9rem 0.5rem}
   .mobile-nav{display:flex!important}
-  .mobile-holdings{display:block!important;bottom:calc(56px + env(safe-area-inset-bottom));height:72px}
+  .mobile-holdings{bottom:calc(56px + env(safe-area-inset-bottom));height:72px}
+  .sync-wrap{display:none}
   .topbar{padding:0 1rem}
   .view-tabs{display:none}
   .metrics-row{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -778,7 +779,7 @@ function renderMobileHoldings(){
   const inner=document.getElementById('mobileHoldingsInner');
   if(!inner)return;
   // hide strip entirely on all holdings view — not needed there
-  if(strip)strip.style.display=state.view==='multi'?'none':'';
+  if(strip)strip.style.display=state.view==='multi'?'none':'block';
   const appEl=document.querySelector('.app');
   if(appEl&&window.innerWidth<=680){
     appEl.style.height=state.view==='multi'
