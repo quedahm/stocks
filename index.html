@@ -193,6 +193,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-weight:
 .mobile-nav-btn{flex:1;background:none;border:none;font-family:var(--font);font-size:0.58rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;padding:10px 0}
 .mobile-nav-btn.active{color:var(--accent)}
 .mobile-nav-icon{width:20px;height:20px;display:block}
+.sync-wrap{position:relative}
+.sync-dropdown{position:absolute;top:calc(100% + 6px);right:0;background:var(--surface);border:1px solid var(--border-med);border-radius:var(--radius);padding:4px;min-width:140px;z-index:200;box-shadow:0 4px 16px rgba(28,24,20,0.1);opacity:0;pointer-events:none;transform:translateY(-4px);transition:opacity 0.15s,transform 0.15s}
+.sync-dropdown.open{opacity:1;pointer-events:all;transform:translateY(0)}
+.sync-option{display:flex;align-items:center;gap:10px;width:100%;background:none;border:none;font-family:var(--font);font-size:0.72rem;font-weight:500;color:var(--text);padding:9px 12px;border-radius:7px;cursor:pointer;text-align:left;transition:background 0.1s}
+.sync-option:hover{background:var(--surface2)}
+.sync-option svg{flex-shrink:0;color:var(--text-muted)}
 </style>
 </head>
 <body>
@@ -206,6 +212,20 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-weight:
       </div>
     </div>
     <div class="topbar-right">
+      <div class="sync-wrap" id="syncWrap">
+        <button class="btn" onclick="toggleSyncMenu(event)">Sync</button>
+        <div class="sync-dropdown" id="syncDropdown">
+          <button class="sync-option" onclick="exportData();closeSyncMenu()">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 1v8M4 6l3 3 3-3"/><path d="M2 10v2h10v-2"/></svg>
+            Export
+          </button>
+          <button class="sync-option" onclick="document.getElementById('importFile').click();closeSyncMenu()">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10V2M4 5l3-3 3 3"/><path d="M2 10v2h10v-2"/></svg>
+            Import
+          </button>
+        </div>
+      </div>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
       <div class="status-bar"><div class="status-dot loading" id="statusDot"></div><span id="statusText">Ready</span></div>
     </div>
   </div>
@@ -246,6 +266,32 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-weight:
     </svg>
     Add
   </button>
+  <button class="mobile-nav-btn" onclick="openModal('mobileSyncModal')">
+    <svg class="mobile-nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 10a7 7 0 0 1 11.9-5"/><path d="M17 10a7 7 0 0 1-11.9 5"/>
+      <polyline points="14,4 17,5 16,8"/><polyline points="6,16 3,15 4,12"/>
+    </svg>
+    Sync
+  </button>
+</div>
+
+<div class="modal-overlay" id="mobileSyncModal">
+  <div class="modal" style="width:300px">
+    <div class="modal-title">Sync</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:1.5rem">
+      <button class="sync-option" style="border:1px solid var(--border);border-radius:9px" onclick="exportData();closeModal('mobileSyncModal')">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1v9M5 7l3 3 3-3"/><path d="M2 11v2h12v-2"/></svg>
+        Export — save to Files
+      </button>
+      <button class="sync-option" style="border:1px solid var(--border);border-radius:9px" onclick="document.getElementById('importFile').click();closeModal('mobileSyncModal')">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 11V2M5 5l3-3 3 3"/><path d="M2 11v2h12v-2"/></svg>
+        Import — load from Files
+      </button>
+    </div>
+    <div style="display:flex;justify-content:flex-end">
+      <button class="btn" onclick="closeModal('mobileSyncModal')">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal-overlay" id="addStockModal">
@@ -608,6 +654,73 @@ function initSidebarDrag(){
       document.querySelectorAll('.stock-card').forEach(c=>c.classList.remove('drag-over','dragging'));
     });
   });
+}
+
+function toggleSyncMenu(e){
+  e.stopPropagation();
+  document.getElementById('syncDropdown').classList.toggle('open');
+}
+function closeSyncMenu(){
+  document.getElementById('syncDropdown').classList.remove('open');
+}
+document.addEventListener('click',function(e){
+  if(!document.getElementById('syncWrap')?.contains(e.target))closeSyncMenu();
+});
+
+function exportData(){
+  const payload={version:1,exportedAt:new Date().toISOString(),stocks:state.stocks.map(s=>({
+    id:s.id,ticker:s.ticker,name:s.name,exchange:s.exchange,purchases:s.purchases
+  }))};
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='stocks-portfolio-'+new Date().toISOString().split('T')[0]+'.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importData(e){
+  const file=e.target.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=function(ev){
+    try{
+      const payload=JSON.parse(ev.target.result);
+      if(!payload.stocks||!Array.isArray(payload.stocks))throw new Error('Invalid format');
+      const incoming=payload.stocks.filter(s=>s.ticker&&s.exchange);
+      if(!incoming.length){alert('No valid stocks found in file.');return;}
+      const msg='How do you want to import?\n\nReplace — clears your current holdings and loads from file.\nMerge — adds new stocks from file, keeps existing ones.';
+      const choice=confirm(msg+'\n\nOK = Replace    Cancel = Merge');
+      if(choice){
+        // replace
+        state.stocks=incoming.map(s=>({...s,currentPrice:null,priceHistory:[]}));
+        state.selectedId=state.stocks[0]?.id||null;
+      }else{
+        // merge — add stocks not already present (matched by ticker+exchange)
+        incoming.forEach(s=>{
+          const exists=state.stocks.find(e=>e.ticker===s.ticker&&e.exchange===s.exchange);
+          if(!exists)state.stocks.push({...s,currentPrice:null,priceHistory:[]});
+          else{
+            // merge purchases — add any purchase IDs not already present
+            s.purchases?.forEach(p=>{
+              if(!exists.purchases.find(ep=>ep.id===p.id))exists.purchases.push(p);
+            });
+            exists.purchases.sort((a,b)=>new Date(a.date)-new Date(b.date));
+          }
+        });
+      }
+      saveState();
+      renderSidebar();
+      renderContent();
+      fetchAllPrices().then(startRefreshTimer);
+      setStatus('live','Imported '+incoming.length+' stock'+(incoming.length!==1?'s':''));
+    }catch(err){
+      alert('Could not read file: '+err.message);
+    }
+    e.target.value='';
+  };
+  reader.readAsText(file);
 }
 
 function reorderStocks(fromId,toId){
@@ -999,6 +1112,7 @@ function switchView(v){
 }
 document.getElementById('addStockModal').addEventListener('click',function(e){if(e.target===this)closeModal('addStockModal');});
 document.getElementById('addPurchaseModal').addEventListener('click',function(e){if(e.target===this)closeModal('addPurchaseModal');});
+document.getElementById('mobileSyncModal').addEventListener('click',function(e){if(e.target===this)closeModal('mobileSyncModal');});
 document.addEventListener('input',function(e){if(e.target.id==='purchaseUnits'||e.target.id==='purchasePrice')updatePurchaseCostHint();});
 
 loadState();
