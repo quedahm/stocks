@@ -137,11 +137,13 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-weight:
 .exch-btn{background:var(--surface2);border:1px solid var(--border);border-radius:7px;font-family:var(--font);font-size:0.68rem;font-weight:600;color:var(--text-muted);padding:8px;cursor:pointer;text-align:center;transition:all 0.15s}
 .exch-btn.active{background:var(--accent-pale);border-color:var(--accent-border);color:var(--accent)}
 .multi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:1rem}
-.multi-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;transition:border-color 0.15s,background 0.15s}
+.multi-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;transition:border-color 0.15s,background 0.15s;touch-action:none}
 .multi-card:hover{border-color:var(--border-med);background:var(--surface2)}
-.stock-card[draggable]{user-select:none}
-.stock-card.drag-over{border-color:var(--accent);background:var(--accent-pale)}
-.stock-card.dragging{opacity:0.4}
+.stock-card[draggable]{user-select:none;touch-action:none}
+.drag-line-before{box-shadow:0 -3px 0 0 var(--accent)!important;border-radius:var(--radius)}
+.drag-line-after{box-shadow:0 3px 0 0 var(--accent)!important;border-radius:var(--radius)}
+.sort-select{background:var(--surface2);border:1px solid var(--border-med);border-radius:7px;font-family:var(--font);font-size:0.65rem;font-weight:600;color:var(--text-muted);padding:5px 10px;cursor:pointer;outline:none;letter-spacing:0.03em}
+.sort-select:focus{border-color:var(--accent);color:var(--text)}
 .multi-card-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1rem}
 .multi-card-left h3{font-size:0.9rem;font-weight:700;letter-spacing:-0.01em}
 .multi-card-left p{font-size:0.65rem;color:var(--text-muted);margin-top:2px;font-weight:400}
@@ -370,7 +372,16 @@ const RANGES={
   'All':{range:'max',interval:'3mo',intraday:false},
 };
 const DEFAULT_RANGE='6M';
-let state={stocks:[],selectedId:null,view:'single',selectedRange:DEFAULT_RANGE};
+const SORT_MODES={
+  'custom':'Custom',
+  'name_asc':'Name A–Z',
+  'name_desc':'Name Z–A',
+  'pct_asc':'% Gain ↑',
+  'pct_desc':'% Gain ↓',
+  'amt_asc':'Value ↑',
+  'amt_desc':'Value ↓',
+};
+let state={stocks:[],selectedId:null,view:'single',selectedRange:DEFAULT_RANGE,sortMode:'custom',stockOrder:[]};
 let priceCache={};
 let selectedExchange='US';
 let currentPurchaseStockId=null;
@@ -380,6 +391,12 @@ function loadState(){
   if(!state.stocks)state.stocks=[];
   if(!state.view)state.view='single';
   if(!state.selectedRange)state.selectedRange=DEFAULT_RANGE;
+  if(!state.sortMode)state.sortMode='custom';
+  if(!state.stockOrder)state.stockOrder=[];
+  // sync stockOrder — add any new stock IDs, remove deleted ones
+  const ids=state.stocks.map(s=>s.id);
+  state.stockOrder=state.stockOrder.filter(id=>ids.includes(id));
+  ids.forEach(id=>{if(!state.stockOrder.includes(id))state.stockOrder.push(id);});
 }
 function saveState(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}
 function genId(){return Date.now().toString(36)+Math.random().toString(36).slice(2);}
@@ -410,6 +427,7 @@ function addStock(){
   if(state.stocks.find(s=>s.ticker===ticker&&s.exchange===selectedExchange)){alert('Already in portfolio.');return;}
   const stock={id:genId(),ticker,name:name||ticker,exchange:selectedExchange,purchases:[],currentPrice:null,priceHistory:[]};
   state.stocks.push(stock);
+  state.stockOrder.push(stock.id);
   if(!state.selectedId)state.selectedId=stock.id;
   saveState();
   closeModal('addStockModal');
@@ -421,6 +439,7 @@ function removeStock(id){
   if(!stock)return;
   if(!confirm('Remove '+stock.ticker+' from your portfolio?'))return;
   state.stocks=state.stocks.filter(s=>s.id!==id);
+  state.stockOrder=state.stockOrder.filter(oid=>oid!==id);
   if(state.selectedId===id)state.selectedId=state.stocks[0]?.id||null;
   saveState();renderSidebar();renderContent();
 }
@@ -593,147 +612,136 @@ function fmtPurchaseTotal(p){
   return p.currency==='KRW'?'\u20a9'+Math.round(v).toLocaleString():p.currency==='USD'?'$'+fmt:'\u20ac'+fmt;
 }
 
-let dragSrcId=null;
-let longPressTimer=null;
+let _dragState=null;
 
-function initSidebarDrag(){
-  const cards=document.querySelectorAll('#stockList .stock-card');
-  cards.forEach(card=>{
-    const id=card.dataset.id;
+function getRangeChange(stock){
+  const h=stock.priceHistory;
+  if(!h||h.length<2||!stock.currentPrice)return{pct:0,amt:0};
+  const first=h[0].price,last=stock.currentPrice;
+  const pct=first>0?(last-first)/first*100:0;
+  const m=calcStockMetrics(stock);
+  const amt=m.totalUnits>0?m.totalUnits*(last-first):last-first;
+  return{pct,amt};
+}
 
-    // desktop: HTML5 drag
-    card.addEventListener('dragstart',e=>{
-      dragSrcId=id;
-      card.classList.add('dragging');
-      e.dataTransfer.effectAllowed='move';
-    });
-    card.addEventListener('dragend',()=>{
-      card.classList.remove('dragging');
-      document.querySelectorAll('.stock-card').forEach(c=>c.classList.remove('drag-over'));
-    });
-    card.addEventListener('dragover',e=>{
-      e.preventDefault();
-      e.dataTransfer.dropEffect='move';
-      if(dragSrcId!==id){card.classList.add('drag-over');}
-    });
-    card.addEventListener('dragleave',()=>card.classList.remove('drag-over'));
-    card.addEventListener('drop',e=>{
-      e.preventDefault();
-      card.classList.remove('drag-over');
-      if(dragSrcId&&dragSrcId!==id)reorderStocks(dragSrcId,id);
-    });
-
-    // mobile: long-press + pointer drag
-    card.addEventListener('pointerdown',e=>{
-      if(e.pointerType!=='touch')return;
-      longPressTimer=setTimeout(()=>{
-        dragSrcId=id;
-        card.classList.add('dragging');
-        card.setPointerCapture(e.pointerId);
-      },400);
-    });
-    card.addEventListener('pointermove',e=>{
-      if(e.pointerType!=='touch'||!dragSrcId)return;
-      clearTimeout(longPressTimer);
-      const el=document.elementFromPoint(e.clientX,e.clientY);
-      const target=el?.closest('.stock-card');
-      document.querySelectorAll('.stock-card').forEach(c=>c.classList.remove('drag-over'));
-      if(target&&target.dataset.id!==dragSrcId)target.classList.add('drag-over');
-    });
-    card.addEventListener('pointerup',e=>{
-      clearTimeout(longPressTimer);
-      if(e.pointerType!=='touch'||!dragSrcId){dragSrcId=null;return;}
-      const el=document.elementFromPoint(e.clientX,e.clientY);
-      const target=el?.closest('.stock-card');
-      document.querySelectorAll('.stock-card').forEach(c=>c.classList.remove('drag-over','dragging'));
-      if(target&&target.dataset.id&&target.dataset.id!==dragSrcId)reorderStocks(dragSrcId,target.dataset.id);
-      dragSrcId=null;
-    });
-    card.addEventListener('pointercancel',()=>{
-      clearTimeout(longPressTimer);
-      dragSrcId=null;
-      document.querySelectorAll('.stock-card').forEach(c=>c.classList.remove('drag-over','dragging'));
-    });
+function getSortedStocks(forStrip=false){
+  const stocks=[...state.stocks];
+  // mobile strip always uses custom order
+  if(forStrip||state.sortMode==='custom'){
+    return state.stockOrder.map(id=>stocks.find(s=>s.id===id)).filter(Boolean);
+  }
+  return stocks.sort((a,b)=>{
+    switch(state.sortMode){
+      case 'name_asc': return a.name.localeCompare(b.name);
+      case 'name_desc': return b.name.localeCompare(a.name);
+      case 'pct_asc': return getRangeChange(a).pct-getRangeChange(b).pct;
+      case 'pct_desc': return getRangeChange(b).pct-getRangeChange(a).pct;
+      case 'amt_asc': return getRangeChange(a).amt-getRangeChange(b).amt;
+      case 'amt_desc': return getRangeChange(b).amt-getRangeChange(a).amt;
+      default: return 0;
+    }
   });
 }
-
-function toggleSyncMenu(e){
-  e.stopPropagation();
-  document.getElementById('syncDropdown').classList.toggle('open');
-}
-function closeSyncMenu(){
-  document.getElementById('syncDropdown').classList.remove('open');
-}
-document.addEventListener('click',function(e){
-  if(!document.getElementById('syncWrap')?.contains(e.target))closeSyncMenu();
-});
-
-function exportData(){
-  const payload={version:1,exportedAt:new Date().toISOString(),stocks:state.stocks.map(s=>({
-    id:s.id,ticker:s.ticker,name:s.name,exchange:s.exchange,purchases:s.purchases
-  }))};
-  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;
-  a.download='stocks-portfolio-'+new Date().toISOString().split('T')[0]+'.json';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function importData(e){
-  const file=e.target.files[0];
-  if(!file)return;
-  const reader=new FileReader();
-  reader.onload=function(ev){
-    try{
-      const payload=JSON.parse(ev.target.result);
-      if(!payload.stocks||!Array.isArray(payload.stocks))throw new Error('Invalid format');
-      const incoming=payload.stocks.filter(s=>s.ticker&&s.exchange);
-      if(!incoming.length){alert('No valid stocks found in file.');return;}
-      const msg='How do you want to import?\n\nReplace — clears your current holdings and loads from file.\nMerge — adds new stocks from file, keeps existing ones.';
-      const choice=confirm(msg+'\n\nOK = Replace    Cancel = Merge');
-      if(choice){
-        // replace
-        state.stocks=incoming.map(s=>({...s,currentPrice:null,priceHistory:[]}));
-        state.selectedId=state.stocks[0]?.id||null;
-      }else{
-        // merge — add stocks not already present (matched by ticker+exchange)
-        incoming.forEach(s=>{
-          const exists=state.stocks.find(e=>e.ticker===s.ticker&&e.exchange===s.exchange);
-          if(!exists)state.stocks.push({...s,currentPrice:null,priceHistory:[]});
-          else{
-            // merge purchases — add any purchase IDs not already present
-            s.purchases?.forEach(p=>{
-              if(!exists.purchases.find(ep=>ep.id===p.id))exists.purchases.push(p);
-            });
-            exists.purchases.sort((a,b)=>new Date(a.date)-new Date(b.date));
-          }
-        });
-      }
-      saveState();
-      renderSidebar();
-      renderContent();
-      fetchAllPrices().then(startRefreshTimer);
-      setStatus('live','Imported '+incoming.length+' stock'+(incoming.length!==1?'s':''));
-    }catch(err){
-      alert('Could not read file: '+err.message);
-    }
-    e.target.value='';
-  };
-  reader.readAsText(file);
-}
-
-function reorderStocks(fromId,toId){
-  const fromIdx=state.stocks.findIndex(s=>s.id===fromId);
-  const toIdx=state.stocks.findIndex(s=>s.id===toId);
-  if(fromIdx===-1||toIdx===-1)return;
-  const moved=state.stocks.splice(fromIdx,1)[0];
-  state.stocks.splice(toIdx,0,moved);
+function setSortMode(mode){
+  state.sortMode=mode;
   saveState();
   renderSidebar();
   renderContent();
 }
+function _createGhost(el){
+  const rect=el.getBoundingClientRect();
+  const g=el.cloneNode(true);
+  g.id='drag-ghost';
+  g.style.cssText='position:fixed;top:'+rect.top+'px;left:'+rect.left+'px;width:'+rect.width+'px;opacity:0.88;pointer-events:none;z-index:9999;box-shadow:0 8px 28px rgba(28,24,20,0.18);border-radius:10px;background:var(--surface);border:1.5px solid var(--accent);transition:none';
+  document.body.appendChild(g);
+  return g;
+}
+function _removeGhost(){
+  document.getElementById('drag-ghost')?.remove();
+  document.querySelectorAll('.drag-line-before,.drag-line-after').forEach(el=>el.classList.remove('drag-line-before','drag-line-after'));
+}
+function _getBestTarget(container,cardSelector,dragId,clientY){
+  const els=Array.from(container.querySelectorAll(cardSelector)).filter(el=>el.dataset.id&&el.dataset.id!==dragId);
+  let best=null,bestDist=Infinity,after=false;
+  els.forEach(el=>{
+    const r=el.getBoundingClientRect();
+    const dist=Math.abs(clientY-(r.top+r.height/2));
+    if(dist<bestDist){bestDist=dist;best=el;after=clientY>r.top+r.height/2;}
+  });
+  return{el:best,after};
+}
+function initDrag(container,cardSelector,isCustom){
+  if(!container)return;
+  const cards=container.querySelectorAll(cardSelector);
+  cards.forEach(card=>{
+    if(card._dragInited)return;
+    card._dragInited=true;
+    const id=card.dataset.id;
+    if(!id)return;
+    let lp=null,startX=0,startY=0,moved=false;
+    card.addEventListener('pointerdown',e=>{
+      if(!isCustom()||e.target.closest('button'))return;
+      startX=e.clientX;startY=e.clientY;moved=false;
+      const delay=e.pointerType==='touch'?420:120;
+      lp=setTimeout(()=>{
+        const g=_createGhost(card);
+        const rect=card.getBoundingClientRect();
+        _dragState={id,ghost:g,ox:e.clientX-rect.left,oy:e.clientY-rect.top,container,cardSelector};
+        card.style.opacity='0.25';
+        try{card.setPointerCapture(e.pointerId);}catch(ex){}
+        if(navigator.vibrate)navigator.vibrate(25);
+      },delay);
+    });
+    card.addEventListener('pointermove',e=>{
+      if(!_dragState||_dragState.id!==id){
+        if(Math.hypot(e.clientX-startX,e.clientY-startY)>6)clearTimeout(lp);
+        return;
+      }
+      moved=true;
+      _dragState.ghost.style.left=(e.clientX-_dragState.ox)+'px';
+      _dragState.ghost.style.top=(e.clientY-_dragState.oy)+'px';
+      document.querySelectorAll('.drag-line-before,.drag-line-after').forEach(el=>el.classList.remove('drag-line-before','drag-line-after'));
+      const{el:best,after}=_getBestTarget(_dragState.container,_dragState.cardSelector,id,e.clientY);
+      if(best)best.classList.add(after?'drag-line-after':'drag-line-before');
+    });
+    card.addEventListener('pointerup',e=>{
+      clearTimeout(lp);
+      if(!_dragState||_dragState.id!==id){_dragState=null;return;}
+      card.style.opacity='';
+      const insertEl=_dragState.container.querySelector('.drag-line-before,.drag-line-after');
+      const insertAfter=insertEl?.classList.contains('drag-line-after');
+      const toId=insertEl?.dataset.id;
+      _removeGhost();
+      const wasMoving=moved;
+      _dragState=null;
+      if(toId&&wasMoving)reorderCustom(id,toId,insertAfter);
+    });
+    card.addEventListener('pointercancel',()=>{
+      clearTimeout(lp);
+      if(_dragState?.id===id){card.style.opacity='';_removeGhost();_dragState=null;}
+    });
+  });
+}
+function reorderCustom(fromId,toId,insertAfter){
+  const order=[...state.stockOrder];
+  const fromIdx=order.indexOf(fromId);
+  if(fromIdx===-1)return;
+  order.splice(fromIdx,1);
+  const newToIdx=order.indexOf(toId);
+  if(newToIdx===-1)return;
+  order.splice(insertAfter?newToIdx+1:newToIdx,0,fromId);
+  state.stockOrder=order;
+  saveState();
+  renderSidebar();
+  renderContent();
+}
+function initSidebarDrag(){
+  initDrag(document.getElementById('stockList'),'.stock-card',()=>state.sortMode==='custom');
+}
+function initMultiDrag(){
+  initDrag(document.getElementById('multiGrid'),'.multi-card',()=>state.sortMode==='custom');
+}
+function reorderStocks(fromId,toId){reorderCustom(fromId,toId,false);}
 
 function renderSidebar(){
   const list=document.getElementById('stockList');
@@ -742,16 +750,17 @@ function renderSidebar(){
     document.getElementById('sidebarTotal').innerHTML='';
     return;
   }
-  list.innerHTML=state.stocks.map(stock=>{
+  list.innerHTML=getSortedStocks().map(stock=>{
     const m=calcStockMetrics(stock);
     const isActive=state.selectedId===stock.id&&state.view==='single';
     const gainClass=m.gainPct>0?'pos':m.gainPct<0?'neg':'neu';
     const gainStr=m.totalUnits===0?'\u2014':(m.gainPct>0?'+':'')+m.gainPct.toFixed(2)+'%';
     const valStr=stock.currentPrice!=null&&m.totalUnits>0?fmtVal(m.currentValue,stock):'\u2014';
-    return '<div class="stock-card'+(isActive?' active':'')+'" onclick="selectStock(\''+stock.id+'\')" draggable="true" data-id="'+stock.id+'"><button class="stock-card-delete" onclick="event.stopPropagation();removeStock(\''+stock.id+'\')" title="Remove">\xd7</button><div class="stock-card-top"><span class="stock-ticker">'+stock.name+'</span><span class="stock-exchange">'+stock.exchange+'</span></div><div class="stock-name">'+stock.ticker+'</div><div class="stock-metrics"><div style="flex:1"><div class="stock-gain '+gainClass+'">'+gainStr+'</div><div class="stock-val">'+valStr+'</div></div><div class="spark-wrap"><canvas id="spark_'+stock.id+'" width="70" height="28"></canvas></div></div></div>';
+    const draggable=state.sortMode==='custom';
+    return '<div class="stock-card'+(isActive?' active':'')+'"'+(draggable?' draggable="true"':'')+' onclick="selectStock(\''+stock.id+'\')" data-id="'+stock.id+'"><button class="stock-card-delete" onclick="event.stopPropagation();removeStock(\''+stock.id+'\')" title="Remove">\xd7</button><div class="stock-card-top"><span class="stock-ticker">'+stock.name+'</span><span class="stock-exchange">'+stock.exchange+'</span></div><div class="stock-name">'+stock.ticker+'</div><div class="stock-metrics"><div style="flex:1"><div class="stock-gain '+gainClass+'">'+gainStr+'</div><div class="stock-val">'+valStr+'</div></div><div class="spark-wrap"><canvas id="spark_'+stock.id+'" width="70" height="28"></canvas></div></div></div>';
   }).join('');
 
-  state.stocks.forEach(stock=>{
+  getSortedStocks().forEach(stock=>{
     const canvas=document.getElementById('spark_'+stock.id);
     if(!canvas||!stock.priceHistory.length)return;
     const old=Chart.getChart(canvas);if(old)old.destroy();
@@ -788,7 +797,8 @@ function renderMobileHoldings(){
   }
   if(state.view==='multi')return;
   if(state.stocks.length===0){inner.innerHTML='<div style="font-size:0.68rem;color:var(--text-dim);line-height:72px;padding:0 4px">No holdings yet</div>';return;}
-  inner.innerHTML=state.stocks.map(stock=>{
+  const stripStocks=getSortedStocks(true);
+  inner.innerHTML=stripStocks.map(stock=>{
     const m=calcStockMetrics(stock);
     const isActive=state.selectedId===stock.id&&state.view==='single';
     const gainClass=m.gainPct>0?'pos':m.gainPct<0?'neg':'neu';
@@ -798,7 +808,7 @@ function renderMobileHoldings(){
       +'<canvas class="mobile-holding-spark" id="mhspark_'+stock.id+'" width="80" height="24"></canvas>'
       +'</div>';
   }).join('');
-  state.stocks.forEach(stock=>{
+  stripStocks.forEach(stock=>{
     const canvas=document.getElementById('mhspark_'+stock.id);
     if(!canvas||!stock.priceHistory.length)return;
     const old=Chart.getChart(canvas);if(old)old.destroy();
@@ -1038,20 +1048,27 @@ function renderMultiView(){
     return d.toLocaleDateString('en-GB',{month:'short',year:'2-digit'});
   }
 
+  const sortOptions=Object.entries(SORT_MODES).map(([k,v])=>'<option value="'+k+'"'+(state.sortMode===k?' selected':'')+'>'+v+'</option>').join('');
+
   content.innerHTML=
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem">'
+    +'<div style="display:flex;align-items:center;gap:0.75rem">'
     +'<span style="font-size:0.62rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-dim)">All holdings</span>'
+    +'<select class="sort-select" onchange="setSortMode(this.value)">'+sortOptions+'</select>'
+    +(state.sortMode==='custom'?'<span style="font-size:0.6rem;color:var(--text-dim)">Hold &amp; drag to reorder</span>':'')
+    +'</div>'
     +'<div class="range-bar">'+Object.keys(RANGES).map(k=>'<button class="range-btn multi-range-btn'+(k===state.selectedRange?' active':'')+'" data-range="'+k+'" onclick="setRangeMulti(\''+k+'\')">'+k+'</button>').join('')+'</div>'
     +'</div>'
     +'<div class="multi-grid" id="multiGrid"></div>';
 
   const grid=document.getElementById('multiGrid');
-  state.stocks.forEach(stock=>{
+  getSortedStocks().forEach(stock=>{
     const m=calcStockMetrics(stock);
     const gainClass=m.gainPct>0?'pos':m.gainPct<0?'neg':'neu';
     const gainStr=m.totalUnits>0?(m.gainPct>0?'+':'')+m.gainPct.toFixed(2)+'%':'\u2014';
     const div=document.createElement('div');
     div.className='multi-card';
+    div.dataset.id=stock.id;
     div.style.cursor='pointer';
     div.onclick=()=>selectStock(stock.id);
     div.innerHTML='<div class="multi-card-header"><div class="multi-card-left"><h3>'+stock.name+' <span style="font-size:0.6rem;font-weight:600;color:var(--text-dim);background:var(--surface2);border:1px solid var(--border);padding:2px 7px;border-radius:4px;letter-spacing:0.06em;vertical-align:middle">'+stock.exchange+'</span></h3><p>'+stock.ticker+'</p></div><div class="multi-card-right"><div class="multi-price">'+(stock.currentPrice?fmtVal(stock.currentPrice,stock):'\u2014')+'</div><div class="multi-gain stock-gain '+gainClass+'">'+gainStr+'</div></div></div><div class="multi-chart-wrap" style="position:relative"><canvas id="multi_'+stock.id+'"></canvas></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:1rem"><div style="background:var(--surface2);border-radius:8px;padding:0.6rem 0.75rem"><div style="font-size:0.58rem;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--text-dim);margin-bottom:3px">Units</div><div style="font-size:0.85rem;font-weight:700">'+(m.totalUnits>0?fmtUnits(m.totalUnits):'\u2014')+'</div></div><div style="background:var(--surface2);border-radius:8px;padding:0.6rem 0.75rem"><div style="font-size:0.58rem;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--text-dim);margin-bottom:3px">Invested</div><div style="font-size:0.85rem;font-weight:700">'+(m.totalUnits>0?fmtVal(m.totalCost,stock):'\u2014')+'</div></div><div style="background:var(--surface2);border-radius:8px;padding:0.6rem 0.75rem"><div style="font-size:0.58rem;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;color:var(--text-dim);margin-bottom:3px">Value</div><div style="font-size:0.85rem;font-weight:700">'+(m.totalUnits>0&&stock.currentPrice?fmtVal(m.currentValue,stock):'\u2014')+'</div></div></div>';
@@ -1070,6 +1087,7 @@ function renderMultiView(){
       div.querySelector('.multi-chart-wrap').innerHTML='<div style="height:100%;display:flex;align-items:center;justify-content:center;font-size:0.7rem;color:var(--text-dim)">Loading\u2026</div>';
     }
   });
+  initMultiDrag();
 }
 
 function editStockName(stockId){
@@ -1100,6 +1118,9 @@ function selectStock(id){
   state.view='single';
   saveState();
   document.querySelectorAll('.view-tab').forEach((t,i)=>t.classList.toggle('active',i===0));
+  const s=document.getElementById('mobileNavSingle');const m=document.getElementById('mobileNavMulti');
+  if(s)s.classList.add('active');
+  if(m)m.classList.remove('active');
   renderSidebar();
   renderContent();
 }
