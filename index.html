@@ -7,6 +7,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="stocks">
 <meta name="mobile-web-app-capable" content="yes">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Stocks</title>
 <link href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
@@ -578,8 +581,18 @@ function renderSidebar(){
 }
 
 function renderMobileHoldings(){
+  const strip=document.getElementById('mobileHoldings');
   const inner=document.getElementById('mobileHoldingsInner');
   if(!inner)return;
+  // hide strip entirely on all holdings view — not needed there
+  if(strip)strip.style.display=state.view==='multi'?'none':'';
+  const appEl=document.querySelector('.app');
+  if(appEl&&window.innerWidth<=680){
+    appEl.style.height=state.view==='multi'
+      ?'calc(100dvh - 56px - env(safe-area-inset-bottom))'
+      :'calc(100dvh - 56px - 72px - env(safe-area-inset-bottom))';
+  }
+  if(state.view==='multi')return;
   if(state.stocks.length===0){inner.innerHTML='<div style="font-size:0.68rem;color:var(--text-dim);line-height:72px;padding:0 4px">No holdings yet</div>';return;}
   inner.innerHTML=state.stocks.map(stock=>{
     const m=calcStockMetrics(stock);
