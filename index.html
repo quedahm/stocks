@@ -1125,6 +1125,20 @@ if(_s)_s.classList.toggle('active',state.view==='single');
 if(_m)_m.classList.toggle('active',state.view==='multi');
 if(state.stocks.length>0){fetchAllPrices().then(startRefreshTimer);}
 else setStatus('loading','Add a stock to begin');
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').then(reg=>{
+    reg.addEventListener('updatefound',()=>{
+      const nw=reg.installing;
+      nw.addEventListener('statechange',()=>{
+        if(nw.state==='installed'&&navigator.serviceWorker.controller){
+          // new version available — reload silently
+          navigator.serviceWorker.controller.postMessage({type:'SKIP_WAITING'});
+          window.location.reload();
+        }
+      });
+    });
+  });
+}
 </script>
 </body>
 </html>
