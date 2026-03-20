@@ -139,6 +139,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-weight:
 .multi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:1rem}
 .multi-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;transition:border-color 0.15s,background 0.15s}
 .multi-card:hover{border-color:var(--border-med);background:var(--surface2)}
+.stock-card[draggable]{user-select:none}
+.stock-card.drag-over{border-color:var(--accent);background:var(--accent-pale)}
+.stock-card.dragging{opacity:0.4}
 .multi-card-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1rem}
 .multi-card-left h3{font-size:0.9rem;font-weight:700;letter-spacing:-0.01em}
 .multi-card-left p{font-size:0.65rem;color:var(--text-muted);margin-top:2px;font-weight:400}
@@ -366,9 +369,9 @@ function addStock(){
   renderSidebar();
   fetchPrice(stock.id);
 }
-function removeStock(id,e){
-  e.stopPropagation();
+function removeStock(id){
   const stock=state.stocks.find(s=>s.id===id);
+  if(!stock)return;
   if(!confirm('Remove '+stock.ticker+' from your portfolio?'))return;
   state.stocks=state.stocks.filter(s=>s.id!==id);
   if(state.selectedId===id)state.selectedId=state.stocks[0]?.id||null;
@@ -543,6 +546,81 @@ function fmtPurchaseTotal(p){
   return p.currency==='KRW'?'\u20a9'+Math.round(v).toLocaleString():p.currency==='USD'?'$'+fmt:'\u20ac'+fmt;
 }
 
+let dragSrcId=null;
+let longPressTimer=null;
+
+function initSidebarDrag(){
+  const cards=document.querySelectorAll('#stockList .stock-card');
+  cards.forEach(card=>{
+    const id=card.dataset.id;
+
+    // desktop: HTML5 drag
+    card.addEventListener('dragstart',e=>{
+      dragSrcId=id;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed='move';
+    });
+    card.addEventListener('dragend',()=>{
+      card.classList.remove('dragging');
+      document.querySelectorAll('.stock-card').forEach(c=>c.classList.remove('drag-over'));
+    });
+    card.addEventListener('dragover',e=>{
+      e.preventDefault();
+      e.dataTransfer.dropEffect='move';
+      if(dragSrcId!==id){card.classList.add('drag-over');}
+    });
+    card.addEventListener('dragleave',()=>card.classList.remove('drag-over'));
+    card.addEventListener('drop',e=>{
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      if(dragSrcId&&dragSrcId!==id)reorderStocks(dragSrcId,id);
+    });
+
+    // mobile: long-press + pointer drag
+    card.addEventListener('pointerdown',e=>{
+      if(e.pointerType!=='touch')return;
+      longPressTimer=setTimeout(()=>{
+        dragSrcId=id;
+        card.classList.add('dragging');
+        card.setPointerCapture(e.pointerId);
+      },400);
+    });
+    card.addEventListener('pointermove',e=>{
+      if(e.pointerType!=='touch'||!dragSrcId)return;
+      clearTimeout(longPressTimer);
+      const el=document.elementFromPoint(e.clientX,e.clientY);
+      const target=el?.closest('.stock-card');
+      document.querySelectorAll('.stock-card').forEach(c=>c.classList.remove('drag-over'));
+      if(target&&target.dataset.id!==dragSrcId)target.classList.add('drag-over');
+    });
+    card.addEventListener('pointerup',e=>{
+      clearTimeout(longPressTimer);
+      if(e.pointerType!=='touch'||!dragSrcId){dragSrcId=null;return;}
+      const el=document.elementFromPoint(e.clientX,e.clientY);
+      const target=el?.closest('.stock-card');
+      document.querySelectorAll('.stock-card').forEach(c=>c.classList.remove('drag-over','dragging'));
+      if(target&&target.dataset.id&&target.dataset.id!==dragSrcId)reorderStocks(dragSrcId,target.dataset.id);
+      dragSrcId=null;
+    });
+    card.addEventListener('pointercancel',()=>{
+      clearTimeout(longPressTimer);
+      dragSrcId=null;
+      document.querySelectorAll('.stock-card').forEach(c=>c.classList.remove('drag-over','dragging'));
+    });
+  });
+}
+
+function reorderStocks(fromId,toId){
+  const fromIdx=state.stocks.findIndex(s=>s.id===fromId);
+  const toIdx=state.stocks.findIndex(s=>s.id===toId);
+  if(fromIdx===-1||toIdx===-1)return;
+  const moved=state.stocks.splice(fromIdx,1)[0];
+  state.stocks.splice(toIdx,0,moved);
+  saveState();
+  renderSidebar();
+  renderContent();
+}
+
 function renderSidebar(){
   const list=document.getElementById('stockList');
   if(state.stocks.length===0){
@@ -556,7 +634,7 @@ function renderSidebar(){
     const gainClass=m.gainPct>0?'pos':m.gainPct<0?'neg':'neu';
     const gainStr=m.totalUnits===0?'\u2014':(m.gainPct>0?'+':'')+m.gainPct.toFixed(2)+'%';
     const valStr=stock.currentPrice!=null&&m.totalUnits>0?fmtVal(m.currentValue,stock):'\u2014';
-    return '<div class="stock-card'+(isActive?' active':'')+'" onclick="selectStock(\''+stock.id+'\')"><button class="stock-card-delete" onclick="removeStock(\''+stock.id+'\',event)">\xd7</button><div class="stock-card-top"><span class="stock-ticker">'+stock.name+'</span><span class="stock-exchange">'+stock.exchange+'</span></div><div class="stock-name">'+stock.ticker+'</div><div class="stock-metrics"><div style="flex:1"><div class="stock-gain '+gainClass+'">'+gainStr+'</div><div class="stock-val">'+valStr+'</div></div><div class="spark-wrap"><canvas id="spark_'+stock.id+'" width="70" height="28"></canvas></div></div></div>';
+    return '<div class="stock-card'+(isActive?' active':'')+'" onclick="selectStock(\''+stock.id+'\')" draggable="true" data-id="'+stock.id+'"><button class="stock-card-delete" onclick="event.stopPropagation();removeStock(\''+stock.id+'\')" title="Remove">\xd7</button><div class="stock-card-top"><span class="stock-ticker">'+stock.name+'</span><span class="stock-exchange">'+stock.exchange+'</span></div><div class="stock-name">'+stock.ticker+'</div><div class="stock-metrics"><div style="flex:1"><div class="stock-gain '+gainClass+'">'+gainStr+'</div><div class="stock-val">'+valStr+'</div></div><div class="spark-wrap"><canvas id="spark_'+stock.id+'" width="70" height="28"></canvas></div></div></div>';
   }).join('');
 
   state.stocks.forEach(stock=>{
@@ -568,6 +646,8 @@ function renderSidebar(){
     const color=m.gainPct>=0?'#4a9068':'#b04e4e';
     new Chart(canvas,{type:'line',data:{labels:prices.map((_,i)=>i),datasets:[{data:prices,borderColor:color,borderWidth:1.5,pointRadius:0,tension:0.3}]},options:{responsive:false,plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{display:false},y:{display:false}},animation:false}});
   });
+
+  initSidebarDrag();
 
   let totalKRW=0,hasAll=true;
   state.stocks.forEach(s=>{
@@ -618,6 +698,7 @@ function renderMobileHoldings(){
 function renderContent(){
   if(state.view==='single')renderSingleView();
   else renderMultiView();
+  renderMobileHoldings();
 }
 
 function renderSingleView(){
