@@ -157,7 +157,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-weight:
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (max-width:680px){
   html{font-size:13px}
-  .app{grid-template-rows:48px 1fr 56px;height:100dvh}
+  .app{grid-template-rows:48px 1fr;height:calc(100dvh - 56px - env(safe-area-inset-bottom))}
   .main{grid-template-columns:1fr;grid-template-rows:1fr}
   .sidebar{display:none}
   .content{padding:1rem 0.9rem;padding-bottom:0}
@@ -172,10 +172,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-weight:
   .range-bar{gap:1px}
   .range-btn{padding:4px 6px;font-size:0.58rem}
 }
-.mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;height:56px;background:var(--surface);border-top:1px solid var(--border);z-index:50;align-items:stretch}
-.mobile-nav-btn{flex:1;background:none;border:none;font-family:var(--font);font-size:0.58rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;padding-bottom:env(safe-area-inset-bottom)}
+.mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);z-index:50;align-items:stretch;padding-bottom:env(safe-area-inset-bottom)}
+.mobile-nav-btn{flex:1;background:none;border:none;font-family:var(--font);font-size:0.58rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;padding:10px 0}
 .mobile-nav-btn.active{color:var(--accent)}
-.mobile-nav-icon{font-size:1.1rem;line-height:1}
+.mobile-nav-icon{width:20px;height:20px;display:block}
 </style>
 </head>
 <body>
@@ -207,13 +207,23 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-weight:
 
 <div class="mobile-nav" id="mobileNav">
   <button class="mobile-nav-btn active" id="mobileNavSingle" onclick="switchView('single')">
-    <span class="mobile-nav-icon">&#128200;</span>Single
+    <svg class="mobile-nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="2,14 7,9 11,12 18,5"/><line x1="2" y1="17" x2="18" y2="17"/>
+    </svg>
+    Single
   </button>
   <button class="mobile-nav-btn" id="mobileNavMulti" onclick="switchView('multi')">
-    <span class="mobile-nav-icon">&#128202;</span>All
+    <svg class="mobile-nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="2" width="7" height="7" rx="1"/><rect x="11" y="2" width="7" height="7" rx="1"/>
+      <rect x="2" y="11" width="7" height="7" rx="1"/><rect x="11" y="11" width="7" height="7" rx="1"/>
+    </svg>
+    All
   </button>
   <button class="mobile-nav-btn" onclick="openAddStock()">
-    <span class="mobile-nav-icon" style="font-size:1.4rem;font-weight:300">+</span>Add
+    <svg class="mobile-nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+      <circle cx="10" cy="10" r="8"/><line x1="10" y1="6" x2="10" y2="14"/><line x1="6" y1="10" x2="14" y2="10"/>
+    </svg>
+    Add
   </button>
 </div>
 
@@ -223,8 +233,8 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-weight:
     <div class="form-group">
       <label class="form-label">Exchange</label>
       <div class="exchange-selector">
-        <button class="exch-btn active" onclick="selectExchange('US',this)">&#127482;&#127480; US (NYSE / NASDAQ)</button>
-        <button class="exch-btn" onclick="selectExchange('KRX',this)">&#127472;&#127479; KRX (Korean Exchange)</button>
+        <button class="exch-btn active" onclick="selectExchange('US',this)">US — NYSE / NASDAQ</button>
+        <button class="exch-btn" onclick="selectExchange('KRX',this)">KR — KRX</button>
       </div>
     </div>
     <div class="form-group">
@@ -558,7 +568,7 @@ function renderContent(){
 
 function renderSingleView(){
   const content=document.getElementById('mainContent');
-  if(state.stocks.length===0){content.innerHTML='<div class="panel-empty"><div class="icon">&#128200;</div><h2>No holdings yet</h2><p>Add a stock or ETF from the sidebar to get started.</p></div>';return;}
+  if(state.stocks.length===0){content.innerHTML='<div class="panel-empty"><div class="icon"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-dim)"><polyline points="3,22 11,14 17,19 29,8"/><line x1="3" y1="27" x2="29" y2="27"/></svg></div><h2>No holdings yet</h2><p>Add a stock or ETF from the sidebar to get started.</p></div>';return;}
   const stock=state.stocks.find(s=>s.id===state.selectedId)||state.stocks[0];
   if(!stock){content.innerHTML='';return;}
   const m=calcStockMetrics(stock);
@@ -769,7 +779,7 @@ async function setRangeMulti(label){
 
 function renderMultiView(){
   const content=document.getElementById('mainContent');
-  if(state.stocks.length===0){content.innerHTML='<div class="panel-empty"><div class="icon">&#128202;</div><h2>No holdings yet</h2><p>Add stocks from the sidebar to see your full portfolio here.</p></div>';return;}
+  if(state.stocks.length===0){content.innerHTML='<div class="panel-empty"><div class="icon"><svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-dim)"><rect x="3" y="3" width="11" height="11" rx="1.5"/><rect x="18" y="3" width="11" height="11" rx="1.5"/><rect x="3" y="18" width="11" height="11" rx="1.5"/><rect x="18" y="18" width="11" height="11" rx="1.5"/></svg></div><h2>No holdings yet</h2><p>Add stocks from the sidebar to see your full portfolio here.</p></div>';return;}
 
   const cfg=RANGES[state.selectedRange];
   function fmtMultiLabel(iso){
